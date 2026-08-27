@@ -75,7 +75,58 @@ def fetch_goldbox(keys):
         raise
 
 
-def send_telegram(keys, text):
+def escape_html(text):
+    return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def build_caption(p):
+    """상품 정보를 이모지/줄바꿈으로 가독성 좋게, 링크는 하이퍼링크로 감싼 HTML 캡션 생성"""
+    name = escape_html(p.get("productName", "상품"))
+    price = p.get("productPrice", 0)
+    url = p.get("productUrl", "")
+    category = p.get("categoryName", "")
+
+    badges = []
+    if p.get("isRocket"):
+        badges.append("🚀로켓배송")
+    if p.get("isFreeShipping"):
+        badges.append("🆓무료배송")
+    badge_line = " ".join(badges)
+
+    lines = [f"🔥 <b>{name}</b>", ""]
+    if category:
+        cat_line = f"📂 {escape_html(category)}"
+        if badge_line:
+            cat_line += f" · {badge_line}"
+        lines.append(cat_line)
+    elif badge_line:
+        lines.append(badge_line)
+
+    lines.append(f"💰 <b>{price:,.0f}원</b> 특가")
+    lines.append("")
+    if url:
+        lines.append(f'<a href="{url}">🔥 상품 보러가기</a>')
+
+    return "\n".join(lines)
+
+
+def send_telegram_photo(keys, photo_url, caption):
+    """이미지(sendPhoto) + HTML 캡션으로 전송. photo_url이 없거나 실패하면 예외를 던져 호출부에서 텍스트 폴백 처리."""
+    token = keys["TELEGRAM_BOT_TOKEN"]
+    chat_id = keys["TELEGRAM_CHAT_ID"]
+    data = urllib.parse.urlencode({
+        "chat_id": chat_id,
+        "photo": photo_url,
+        "caption": caption,
+        "parse_mode": "HTML",
+    }).encode("utf-8")
+    req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendPhoto", data=data)
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def send_telegram_text(keys, text):
+    """이미지가 없거나 sendPhoto가 실패했을 때의 텍스트 전용 폴백"""
     token = keys["TELEGRAM_BOT_TOKEN"]
     chat_id = keys["TELEGRAM_CHAT_ID"]
     data = urllib.parse.urlencode({
@@ -108,37 +159,39 @@ def main():
 
     new_count = 0
     for p in products:
-        pid = str(p.get("productId"))
-        if pid in sent_ids:
-            continue
-
-        name = p.get("productName", "상품")
-        price = p.get("productPrice", 0)
-        url = p.get("productUrl", "")
-        category = p.get("categoryName", "")
-        badges = []
-        if p.get("isRocket"):
-            badges.append("🚀로켓배송")
-        if p.get("isFreeShipping"):
-            badges.append("🆓무료배송")
-        badge_line = " ".join(badges)
-
-        msg = f"🔥 <b>{name}</b>\n"
-        if category:
-            msg += f"📂 {category}"
-            if badge_line:
-                msg += f" · {badge_line}"
-            msg += "\n"
-        elif badge_line:
-            msg += f"{badge_line}\n"
-        msg += f"💰 {price:,}원\n{url}"
+        # 상품 하나 처리 중 어떤 예외가 나도 전체 루프는 계속 진행 (다음 상품으로 넘어감)
         try:
-            send_telegram(keys, msg)
-            sent_ids.add(pid)
-            new_count += 1
-            time.sleep(1)
+            pid = str(p.get("productId"))
+            if pid in sent_ids:
+                continue
+
+            name = p.get("productName", "상품")
+            photo_url = p.get("productImage", "")
+            caption = build_caption(p)
+
+            sent_ok = False
+            if photo_url:
+                try:
+                    send_telegram_photo(keys, photo_url, caption)
+                    sent_ok = True
+                except Exception as e:
+                    print(f"[경고] 이미지 전송 실패, 텍스트로 재시도 ({name}): {e}")
+
+            if not sent_ok:
+                try:
+                    send_telegram_text(keys, caption)
+                    sent_ok = True
+                except Exception as e:
+                    print(f"[에러] 텔레그램 전송 완전 실패 ({name}): {e}")
+
+            if sent_ok:
+                sent_ids.add(pid)
+                new_count += 1
+                time.sleep(1)
         except Exception as e:
-            print(f"[에러] 텔레그램 전송 실패 ({name}): {e}")
+            # 개별 상품 파싱/처리 단계에서의 예상 못한 오류도 흡수하고 다음 상품 진행
+            print(f"[에러] 상품 처리 중 알 수 없는 오류 (건너뜀): {e}")
+            continue
 
     save_sent(sent_ids)
     print(f"[완료] 신규 특가 {new_count}건 전송, 전체 확인 {len(products)}건")
