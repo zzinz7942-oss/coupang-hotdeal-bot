@@ -115,8 +115,23 @@ def main():
         name = p.get("productName", "상품")
         price = p.get("productPrice", 0)
         url = p.get("productUrl", "")
+        category = p.get("categoryName", "")
+        badges = []
+        if p.get("isRocket"):
+            badges.append("🚀로켓배송")
+        if p.get("isFreeShipping"):
+            badges.append("🆓무료배송")
+        badge_line = " ".join(badges)
 
-        msg = f"🔥 <b>{name}</b>\n가격: {price:,}원\n{url}"
+        msg = f"🔥 <b>{name}</b>\n"
+        if category:
+            msg += f"📂 {category}"
+            if badge_line:
+                msg += f" · {badge_line}"
+            msg += "\n"
+        elif badge_line:
+            msg += f"{badge_line}\n"
+        msg += f"💰 {price:,}원\n{url}"
         try:
             send_telegram(keys, msg)
             sent_ids.add(pid)
