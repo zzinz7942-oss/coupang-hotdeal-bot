@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 shorts_output/tmp_*
 shorts_output/short_*.mp4
+shorts_output/scene_test.png
