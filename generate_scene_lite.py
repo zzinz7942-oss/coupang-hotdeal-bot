@@ -12,11 +12,18 @@ import urllib.request
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188")
 
 
-def generate_scene(prompt, negative_prompt="blurry, low quality, deformed, watermark, text", out_path=None,
-                    width=512, height=768, steps=20, cfg=7.0, upscale=True):
-    """가벼운 SD1.5 생성 + 선택적 RealESRGAN 업스케일"""
+def generate_scene(prompt, negative_prompt="blurry, low quality, deformed, watermark, text, cartoon, illustration, anime, drawing, painting",
+                    out_path=None, width=768, height=1152, steps=25, cfg=6.5, upscale=True, realistic=True):
+    """가벼운 생성 + 선택적 RealESRGAN 업스케일
+    realistic=True: juggernautXL(SDXL) 사용, 실사 품질이 필요할 때 (SD1.5보다 무겁지만 여전히 풀 SDXL 파이프라인보다 저해상도라 가벼움)
+    realistic=False: SD1.5 사용, 배경/일러스트풍 씬에 가장 가벼움
+    """
+    checkpoint = "juggernautXL.safetensors" if realistic else "v1-5-pruned-emaonly-fp16.safetensors"
+    if realistic:
+        prompt = f"{prompt}, photorealistic, 8k, professional photography, sharp focus, realistic skin texture, natural lighting"
+
     workflow = {
-        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "v1-5-pruned-emaonly-fp16.safetensors"}},
+        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": checkpoint}},
         "2": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["1", 1], "text": prompt}},
         "3": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["1", 1], "text": negative_prompt}},
         "4": {"class_type": "EmptyLatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}},
@@ -71,5 +78,6 @@ if __name__ == "__main__":
     import sys
     prompt = sys.argv[1] if len(sys.argv) > 1 else "cinematic scene, ancient korean warrior, dramatic lighting, epic composition"
     out = sys.argv[2] if len(sys.argv) > 2 else "scene_test.png"
-    ok = generate_scene(prompt, out_path=out)
+    realistic = "--lite" not in sys.argv
+    ok = generate_scene(prompt, out_path=out, realistic=realistic)
     print("OK" if ok else "FAIL")
