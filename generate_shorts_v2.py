@@ -60,9 +60,25 @@ def escape_ass_text(text):
     return text.replace("\\", "\\\\").replace("{", "").replace("}", "").replace("\n", "\\N")
 
 
-def write_ass_subtitle(path, product_name, price):
+HOOK_TEMPLATES = [
+    "이 가격 실화냐...?",
+    "몇 개 안 남았다는데?",
+    "지금 안 사면 후회함",
+    "가격 보고 두 번 봄",
+]
+
+
+def pick_hook(product_id):
+    # 상품별로 항상 같은 후킹 문구가 나오도록 결정적으로 선택 (재실행해도 일관성 유지)
+    return HOOK_TEMPLATES[int(product_id) % len(HOOK_TEMPLATES)]
+
+
+def write_ass_subtitle(path, product_name, price, product_id="0"):
+    hook_line = escape_ass_text(pick_hook(product_id))
     name_line = escape_ass_text(product_name[:40])
-    price_line = f"{price:,.0f}원 특가"
+    price_line = f"💰 {price:,.0f}원"
+    cta_line = "지금 클릭하고 득템하기 👉"
+
     ass_content = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -70,24 +86,28 @@ PlayResY: 1920
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Name,Malgun Gothic,54,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,2,2,60,60,220,1
-Style: Price,Malgun Gothic,90,&H0000A5FF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,5,3,2,60,60,90,1
+Style: Hook,Malgun Gothic,72,&H0000D7FF,&H000000FF,&H00000000,&H90000000,1,0,0,0,100,100,0,0,1,5,3,5,60,60,60,1
+Style: Name,Malgun Gothic,50,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,2,2,60,60,260,1
+Style: Price,Malgun Gothic,100,&H0000A5FF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,5,3,2,60,60,120,1
+Style: CTA,Malgun Gothic,58,&H0000FFFF,&H000000FF,&H00000000,&H90000000,1,0,0,0,100,100,0,0,1,4,3,2,60,60,60,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-Dialogue: 0,0:00:00.00,0:00:05.00,Name,,0,0,0,,{name_line}
-Dialogue: 0,0:00:00.00,0:00:05.00,Price,,0,0,0,,{price_line}
+Dialogue: 0,0:00:00.00,0:00:02.00,Hook,,0,0,0,,{hook_line}
+Dialogue: 0,0:00:02.00,0:00:07.00,Name,,0,0,0,,{name_line}
+Dialogue: 0,0:00:02.00,0:00:07.00,Price,,0,0,0,,{price_line}
+Dialogue: 0,0:00:04.50,0:00:07.00,CTA,,0,0,0,,{cta_line}
 """
     with open(path, "w", encoding="utf-8-sig") as f:
         f.write(ass_content)
 
 
-def make_short(image_path, ass_path, output_path, duration=5):
+def make_short(image_path, ass_path, output_path, duration=7):
     ass_path_ffmpeg = ass_path.replace("\\", "/").replace(":", "\\:")
     filter_complex = (
         f"scale=1080:1920:force_original_aspect_ratio=increase,"
         f"crop=1080:1920,"
-        f"zoompan=z='min(zoom+0.0008,1.15)':d={duration*25}:s=1080x1920:fps=25,"
+        f"zoompan=z='min(zoom+0.0015,1.25)':d={duration*25}:s=1080x1920:fps=25,"
         f"subtitles='{ass_path_ffmpeg}'"
     )
     cmd = [
@@ -124,7 +144,7 @@ def main():
 
         try:
             download_image(image_url, img_path)
-            write_ass_subtitle(ass_path, name, price)
+            write_ass_subtitle(ass_path, name, price, product_id=pid)
             make_short(img_path, ass_path, out_path)
             print(f"[완료:제품샷] {out_path}")
         except subprocess.CalledProcessError as e:
