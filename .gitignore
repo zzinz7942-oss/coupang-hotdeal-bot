@@ -4,3 +4,4 @@ shorts_output/tmp_*
 shorts_output/short_*.mp4
 shorts_output/scene_test.png
 shorts_output/scene_realistic_test.png
+shorts_sent.json
