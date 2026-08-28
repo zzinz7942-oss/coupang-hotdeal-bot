@@ -1,8 +1,7 @@
 """
 쿠팡 골드박스 특가 -> 세로 숏폼(쇼츠) 영상 자동 생성
-- 방식: 원본 상품 사진 + 켄번즈(zoompan) 줌 + 가격/이름 자막
-- (참고) 인물 합성(IP-Adapter) 방식은 신체 왜곡이 반복 재현되어 폐기함
-- 출력: shorts_output/short_<productId>.mp4
+- 상품 이미지를 다운받아 켄번즈(zoompan) 효과 + 가격/이름 자막을 입힌 mp4 생성
+- 출력: shorts_output/short_<productId>.mp4 (1080x1920, 5초)
 """
 
 import hashlib
@@ -10,7 +9,6 @@ import hmac
 import json
 import os
 import subprocess
-import time
 import urllib.request
 import urllib.parse
 from datetime import datetime, timezone
@@ -24,7 +22,8 @@ GOLDBOX_PATH = "/v2/providers/affiliate_open_api/apis/openapi/v1/products/bestca
 
 
 def load_keys():
-    keys_env = {k: os.environ.get(k) for k in ["COUPANG_ACCESS_KEY", "COUPANG_SECRET_KEY"]}
+    keys_env = {k: os.environ.get(k) for k in
+                ["COUPANG_ACCESS_KEY", "COUPANG_SECRET_KEY"]}
     if all(keys_env.values()):
         return keys_env
     keys_file = r"G:\내 드라이브\AI_JARVIS\AI_JARVIS_AGENT\keys.json"
@@ -126,7 +125,7 @@ def main():
             download_image(image_url, img_path)
             write_ass_subtitle(ass_path, name, price)
             make_short(img_path, ass_path, out_path)
-            print(f"[완료:제품샷] {out_path}")
+            print(f"[완료] {out_path}")
         except subprocess.CalledProcessError as e:
             print(f"[에러] ffmpeg 실패 ({name}): {e.stderr[-500:]}")
         except Exception as e:
