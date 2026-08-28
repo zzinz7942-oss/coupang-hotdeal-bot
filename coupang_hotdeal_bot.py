@@ -27,7 +27,29 @@ def load_keys():
         "COUPANG_SECRET_KEY": os.environ["COUPANG_SECRET_KEY"],
         "TELEGRAM_BOT_TOKEN": os.environ["TELEGRAM_BOT_TOKEN"],
         "TELEGRAM_CHAT_ID": os.environ["TELEGRAM_CHAT_ID"],
+        "GOOGLE_API_KEY": os.environ.get("GOOGLE_API_KEY", ""),
     }
+
+
+def generate_ai_hook(google_api_key, prod_name, price):
+    """Gemini로 짧은 후킹 문구 생성. 실패하면 고정 폴백 문구 사용."""
+    fallback = "🔥 실시간 인기 폭발! 재고 소진 전 빠르게 득템하세요."
+    if not google_api_key:
+        return fallback
+    prompt = (
+        f"상품명: {prod_name}\n가격: {price:,}원\n\n"
+        "위 상품을 사고 싶게 만드는 1문장짜리 후킹 카피를 작성해줘. "
+        "이모지 1~2개 포함, URL/설명 없이 한 문장만 출력."
+    )
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={google_api_key}"
+        payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
+        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except Exception:
+        return fallback
 
 
 def load_sent():
@@ -79,11 +101,10 @@ def escape_html(text):
     return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
-def build_caption(p):
-    """상품 정보를 이모지/줄바꿈으로 가독성 좋게, 링크는 하이퍼링크로 감싼 HTML 캡션 생성"""
+def build_caption(p, ai_hook):
+    """상품 정보를 이모지/줄바꿈으로 가독성 좋게 구성한 HTML 캡션. URL은 본문에 넣지 않고 인라인 버튼으로 분리."""
     name = escape_html(p.get("productName", "상품"))
     price = p.get("productPrice", 0)
-    url = p.get("productUrl", "")
     category = p.get("categoryName", "")
 
     badges = []
@@ -104,14 +125,17 @@ def build_caption(p):
 
     lines.append(f"💰 <b>{price:,.0f}원</b> 특가")
     lines.append("")
-    if url:
-        lines.append(f'<a href="{url}">🔥 상품 보러가기</a>')
+    lines.append(escape_html(ai_hook))
 
     return "\n".join(lines)
 
 
-def send_telegram_photo(keys, photo_url, caption):
-    """이미지(sendPhoto) + HTML 캡션으로 전송. photo_url이 없거나 실패하면 예외를 던져 호출부에서 텍스트 폴백 처리."""
+def _inline_button(url):
+    return json.dumps({"inline_keyboard": [[{"text": "🔥 쿠팡에서 바로 보러가기", "url": url}]]})
+
+
+def send_telegram_photo(keys, photo_url, caption, product_url):
+    """이미지(sendPhoto) + 인라인 버튼(URL 본문 미노출)으로 전송. 실패하면 예외를 던져 호출부에서 텍스트 폴백 처리."""
     token = keys["TELEGRAM_BOT_TOKEN"]
     chat_id = keys["TELEGRAM_CHAT_ID"]
     data = urllib.parse.urlencode({
@@ -119,21 +143,22 @@ def send_telegram_photo(keys, photo_url, caption):
         "photo": photo_url,
         "caption": caption,
         "parse_mode": "HTML",
+        "reply_markup": _inline_button(product_url),
     }).encode("utf-8")
     req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendPhoto", data=data)
     with urllib.request.urlopen(req, timeout=15) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def send_telegram_text(keys, text):
-    """이미지가 없거나 sendPhoto가 실패했을 때의 텍스트 전용 폴백"""
+def send_telegram_text(keys, text, product_url):
+    """이미지가 없거나 sendPhoto가 실패했을 때의 텍스트+인라인 버튼 폴백"""
     token = keys["TELEGRAM_BOT_TOKEN"]
     chat_id = keys["TELEGRAM_CHAT_ID"]
     data = urllib.parse.urlencode({
         "chat_id": chat_id,
         "text": text,
         "parse_mode": "HTML",
-        "disable_web_page_preview": "false"
+        "reply_markup": _inline_button(product_url),
     }).encode("utf-8")
     req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=data)
     with urllib.request.urlopen(req, timeout=15) as resp:
@@ -166,20 +191,26 @@ def main():
                 continue
 
             name = p.get("productName", "상품")
+            price = p.get("productPrice", 0)
             photo_url = p.get("productImage", "")
-            caption = build_caption(p)
+            product_url = p.get("productUrl", "")
+            if not product_url:
+                continue
+
+            ai_hook = generate_ai_hook(keys.get("GOOGLE_API_KEY", ""), name, price)
+            caption = build_caption(p, ai_hook)
 
             sent_ok = False
             if photo_url:
                 try:
-                    send_telegram_photo(keys, photo_url, caption)
+                    send_telegram_photo(keys, photo_url, caption, product_url)
                     sent_ok = True
                 except Exception as e:
                     print(f"[경고] 이미지 전송 실패, 텍스트로 재시도 ({name}): {e}")
 
             if not sent_ok:
                 try:
-                    send_telegram_text(keys, caption)
+                    send_telegram_text(keys, caption, product_url)
                     sent_ok = True
                 except Exception as e:
                     print(f"[에러] 텔레그램 전송 완전 실패 ({name}): {e}")
